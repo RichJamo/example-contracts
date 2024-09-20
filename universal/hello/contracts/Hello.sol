@@ -37,7 +37,7 @@ contract Hello is UniversalContract {
         uint256 gasLimit = 30000000; // 7000000
 
         address evmRecipient = 0xE6E340D132b5f46d1e472DebcD681B2aBc16e57E;
-
+        uint256 amount = 2000000; // 2 USDC
         bytes memory recipient = abi.encodePacked(evmRecipient);
 
         bytes4 functionSelector = bytes4(keccak256(bytes("hello(string)"))); // is this right?
@@ -56,8 +56,9 @@ contract Hello is UniversalContract {
             uint256(30000000) // onRevertGasLimit
         );
 
-        IGatewayZEVM(_GATEWAY_ADDRESS).call(
+        IGatewayZEVM(_GATEWAY_ADDRESS).withdrawAndCall(
             recipient, // this contains the recipient smart contract address
+            amount,
             zrc20, // this is used as an identifier of which chain to call
             outgoingMessage, // this is the function call for depositIntoVault(uint256 amount) in VaultManager
             gasLimit,

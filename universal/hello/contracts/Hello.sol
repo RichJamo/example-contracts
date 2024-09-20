@@ -31,13 +31,12 @@ contract Hello is UniversalContract {
         emit HelloEvent("Hello from a universal app", decodedMessage);
     }
 
-    function investAssets() external {
-        address zrc20 = 0x9fd96203f7b22bCF72d9DCb40ff98302376cE09c; // ZRC-20 ETH.ETH (have tried with USDC as well)
-        IZRC20(zrc20).approve(_GATEWAY_ADDRESS, 30000000); // is this right? Is it the protocol address or the gateway address?
+    function investAssets(uint256 amount) external {
+        address zrc20 = 0x9fd96203f7b22bCF72d9DCb40ff98302376cE09c; // ZRC-20 USDC.ETH
+        IZRC20(zrc20).approve(_GATEWAY_ADDRESS, type(uint256).max);
         uint256 gasLimit = 30000000; // 7000000
 
         address evmRecipient = 0xE6E340D132b5f46d1e472DebcD681B2aBc16e57E;
-        uint256 amount = 2000000; // 2 USDC
         bytes memory recipient = abi.encodePacked(evmRecipient);
 
         bytes4 functionSelector = bytes4(keccak256(bytes("hello(string)"))); // is this right?

@@ -15,7 +15,9 @@ task("check-balance", "Checks the balance of an account on an ERC-20 token")
     // ABI of the ERC-20 contract
     const erc20Abi = [
       "function balanceOf(address account) view returns (uint256)",
-      "function decimals() view returns (uint8)"
+      "function decimals() view returns (uint8)",
+      "function CHAIN_ID() view returns (uint256)",
+      "function SYSTEM_CONTRACT_ADDRESS() view returns (address)"
     ];
 
     // Connect to the ERC-20 contract
@@ -28,6 +30,15 @@ task("check-balance", "Checks the balance of an account on an ERC-20 token")
     // Get the token decimals
     const decimals: number = await erc20Contract.decimals();
     console.log("Decimals", decimals);
+
+    //Get the chain id
+    const chainId: number = await erc20Contract.CHAIN_ID();
+    console.log("Chain ID", chainId);
+
+    //Get the system contract address
+    const systemContractAddress: string = await erc20Contract.SYSTEM_CONTRACT_ADDRESS();
+    console.log("System Contract Address", systemContractAddress);
+
     // Format the balance
     const formattedBalance: string = ethers.utils.formatUnits(balance, decimals);
 

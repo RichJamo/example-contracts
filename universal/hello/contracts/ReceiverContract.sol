@@ -14,6 +14,10 @@ contract ReceiverContract {
         emit HelloEvent(message);
     }
 
+    function helloSimple() external {
+        emit HelloEvent("Hello from a universal app");
+    }
+
     function onRevert(RevertContext calldata revertContext) external {
         emit RevertEvent("Event from RevertContract!");
     }

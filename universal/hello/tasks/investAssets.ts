@@ -2,8 +2,8 @@ import { task } from "hardhat/config";
 import "@nomiclabs/hardhat-ethers";
 import { ethers } from "ethers";
 
-task("invest-assets", "Checks the balance of an account on an ERC-20 token")
-  // .addParam("account", "The account address")
+task("invest-assets", "Triggers the InvestAssets transaction on the hello contract")
+  .addParam("amount", "Amount to invest")
   .addParam("contract", "The hello contract address")
   .setAction(async (taskArgs, hre) => {
     // const account: string = taskArgs.account;
@@ -14,7 +14,7 @@ task("invest-assets", "Checks the balance of an account on an ERC-20 token")
 
     // ABI of the contract
     const helloAbi = [
-      "function investAssets()",
+      "function investAssets(uint256 amount)",
     ];
 
     const helloContract = new hre.ethers.Contract(contractAddress, helloAbi, signer);
@@ -23,7 +23,7 @@ task("invest-assets", "Checks the balance of an account on an ERC-20 token")
     const gasLimit = 30000000; // Set the desired gas limit
 
     // Call the contract's investAssets function with the gas limit override
-    await helloContract.investAssets({
+    await helloContract.investAssets(taskArgs.amount, {
       gasLimit: gasLimit,
     });
 

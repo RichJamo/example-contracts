@@ -12,6 +12,7 @@ import {RevertContext, RevertOptions} from "@zetachain/protocol-contracts/contra
 import "@zetachain/protocol-contracts/contracts/zevm/interfaces/UniversalContract.sol";
 import "@zetachain/protocol-contracts/contracts/zevm/interfaces/IGatewayZEVM.sol";
 import "@zetachain/protocol-contracts/contracts/zevm/interfaces/IZRC20.sol";
+import "hardhat/console.sol";
 
 import "./interfaces/IStrategy.sol";
 
@@ -89,10 +90,11 @@ contract UpgradeableVault is
         uint256 amount,
         bytes calldata message
     ) external override {
-        // address decodedAddress;
-        // if (message.length > 0) {
-        //     decodedAddress = abi.decode(message, (address));
-        // }
+        address decodedAddress;
+        if (message.length > 0) {
+            decodedAddress = abi.decode(message, (address));
+            console.log("Decoded address: %s", decodedAddress);
+        }
         investAssets(amount, zrc20);
     }
 

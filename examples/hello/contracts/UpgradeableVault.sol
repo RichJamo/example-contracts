@@ -93,12 +93,15 @@ contract UpgradeableVault is
         address decodedAddress;
         if (message.length > 0) {
             decodedAddress = abi.decode(message, (address));
-            console.log("Decoded address: %s", decodedAddress);
         }
-        investAssets(amount, zrc20);
+        investAssets(decodedAddress, amount, zrc20);
     }
 
-    function investAssets(uint256 amount, address zrc20) internal {
+    function investAssets(
+        address user,
+        uint256 amount,
+        address zrc20
+    ) internal {
         address gas_zrc20 = 0x2ca7d64A7EFE2D62A725E2B35Cf7230D6677FfEe; // ZRC-20 ETH.ETH
         IZRC20(gas_zrc20).approve(_GATEWAY_ADDRESS, type(uint256).max);
         uint256 gasLimit = 30000000; // could potentially reduce to 7000000

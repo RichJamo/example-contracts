@@ -58,6 +58,7 @@ contract UpgradeableVault is
         string memory name_,
         string memory symbol_,
         IERC20 asset_,
+        address strategyAddress_,
         address treasuryAddress_,
         uint16 performanceFeeRate_
     ) external initializer {
@@ -67,6 +68,7 @@ contract UpgradeableVault is
         __UUPSUpgradeable_init();
 
         _asset = asset_;
+        strategyAddress = strategyAddress_;
         _decimals = IERC20Metadata(address(asset_)).decimals();
         treasuryAddress = treasuryAddress_;
         performanceFeeRate = performanceFeeRate_;
@@ -87,12 +89,11 @@ contract UpgradeableVault is
         uint256 amount,
         bytes calldata message
     ) external override {
-        string memory decodedMessage;
-        if (message.length > 0) {
-            decodedMessage = abi.decode(message, (string));
-        }
+        // address decodedAddress;
+        // if (message.length > 0) {
+        //     decodedAddress = abi.decode(message, (address));
+        // }
         investAssets(amount, zrc20);
-        emit HelloEvent("Hello from a universal app", decodedMessage);
     }
 
     function investAssets(uint256 amount, address zrc20) internal {
@@ -102,8 +103,8 @@ contract UpgradeableVault is
 
         IZRC20(zrc20).approve(_GATEWAY_ADDRESS, amount);
 
-        address evmRecipient = 0xE6E340D132b5f46d1e472DebcD681B2aBc16e57E; // TODO change this to the MockStrategy address
-        bytes memory recipient = abi.encodePacked(evmRecipient);
+        // address evmRecipient = 0xE6E340D132b5f46d1e472DebcD681B2aBc16e57E; // TODO change this to the MockStrategy address
+        bytes memory recipient = abi.encodePacked(strategyAddress);
 
         bytes4 functionSelector = bytes4(keccak256(bytes("invest(uint256)")));
         bytes memory encodedArgs = abi.encode(amount);

@@ -154,6 +154,8 @@ contract UpgradeableVault is
                 revertOptions // do these need to be different from the revertOptions in deposit?
             );
         } else {
+            console.log("Executing Deposit");
+
             // amount > 0 and sender != strategyAddress indicates that it's a deposit - is this a tight enough condition?
             address decodedAddress;
             if (message.length > 0) {
@@ -265,7 +267,7 @@ contract UpgradeableVault is
         uint256 assets,
         address receiver
     ) public virtual override returns (uint256) {
-        if (assets <= maxDeposit(receiver)) revert DepositExceedsLimit();
+        if (assets > maxDeposit(receiver)) revert DepositExceedsLimit();
 
         uint256 shares = previewDeposit(assets);
 
@@ -366,7 +368,7 @@ contract UpgradeableVault is
         address receiver,
         address user
     ) public virtual override returns (uint256) {
-        if (shares <= maxRedeem(user)) revert RedeemExceedsLimit();
+        if (shares > maxRedeem(user)) revert RedeemExceedsLimit();
 
         uint256 assets = previewRedeem(shares);
 

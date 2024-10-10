@@ -39,13 +39,25 @@ contract Mock4626Strategy is Ownable {
     }
 
     function invest(uint256 amount) external onlyGateway {
-        bool success = inputToken.approve(address(receiptToken), amount);
+        bool success = inputToken.transferFrom(
+            _GATEWAY_ADDRESS,
+            address(this),
+            amount
+        );
+        require(success, "Transfer failed");
+        success = inputToken.approve(address(receiptToken), amount);
         require(success, "Approval failed");
-        receiptToken.deposit(amount, address(this));
+        uint256 shares = receiptToken.deposit(amount, address(this));
+        require(shares > 0, "Deposit failed");
     }
 
     function withdraw(uint256 _amount) external onlyGateway {
-        receiptToken.withdraw(_amount, msg.sender, address(this));
+        uint256 shares = receiptToken.withdraw(
+            _amount,
+            msg.sender,
+            address(this)
+        );
+        require(shares > 0, "Withdraw failed");
     }
 
     function totalUnderlyingAssets() external view returns (uint256) {

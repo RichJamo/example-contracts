@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
@@ -18,13 +17,24 @@ import "./interfaces/IStrategy.sol";
 
 contract UpgradeableVault is
     Initializable,
-    ERC20Upgradeable,
     ERC4626Upgradeable,
     UUPSUpgradeable,
     OwnableUpgradeable,
     UniversalContract
 {
     using SafeERC20 for IERC20;
+
+    error InvalidStrategyAddress();
+    error InvalidTreasuryAddress();
+    error FeeExceedsLimit();
+    error ApprovalFailed();
+    error NothingToWithdraw();
+    error InvalidZRC20Address();
+    error CantBeZeroAddress();
+    error DepositExceedsLimit();
+    error MintExceedsLimit();
+    error WithdrawExceedsLimit();
+    error RedeemExceedsLimit();
 
     IZRC20 private _asset;
     uint8 private _decimals;
@@ -35,8 +45,6 @@ contract UpgradeableVault is
 
     address constant _GATEWAY_ADDRESS =
         0xA51c1fc2f0D1a1b8494Ed1FE312d7C3a78Ed91C0;
-    address constant _PROTOCOL_ADDRESS =
-        0x735b14BB79463307AAcBED86DAf3322B1e6226aB;
 
     mapping(address => uint256) private userPrincipal;
 
@@ -63,7 +71,7 @@ contract UpgradeableVault is
         address treasuryAddress_,
         uint16 performanceFeeRate_
     ) external initializer {
-        require(treasuryAddress_ != address(0), "Invalid treasury address");
+        if (treasuryAddress_ == address(0)) revert InvalidTreasuryAddress();
         __ERC20_init(name_, symbol_);
         __Ownable_init(msg.sender);
         __UUPSUpgradeable_init();
@@ -90,13 +98,71 @@ contract UpgradeableVault is
         uint256 amount,
         bytes calldata message
     ) external override {
-        address decodedAddress;
-        if (message.length > 0) {
-            decodedAddress = abi.decode(message, (address));
+        if (amount == 0) {
+            // this indicates that it's an initial call to withdraw - is this a tight enough condition?
+            address gas_zrc20 = 0x2ca7d64A7EFE2D62A725E2B35Cf7230D6677FfEe; // ZRC-20 ETH.ETH - TODO in future this will have to indicate target chain dynamically
+            IZRC20(gas_zrc20).approve(_GATEWAY_ADDRESS, type(uint256).max);
+            uint256 gasLimit = 30000000; // could potentially reduce to 7000000
+
+            bytes memory recipient = abi.encodePacked(strategyAddress);
+
+            bytes4 functionSelector = bytes4(
+                keccak256(bytes("withdraw(uint256)"))
+            );
+            bytes memory encodedArgs = abi.encode(amount);
+            bytes memory outgoingMessage = abi.encodePacked(
+                functionSelector,
+                encodedArgs
+            );
+
+            RevertOptions memory revertOptions = RevertOptions(
+                0xc3e53F4d16Ae77Db1c982e75a937B9f60FE63690, // revert address
+                false, // callOnRevert
+                address(this), // abortAddress
+                bytes("revert message"),
+                uint256(30000000) // onRevertGasLimit
+            );
+
+            IGatewayZEVM(_GATEWAY_ADDRESS).call(
+                recipient,
+                address(_asset),
+                outgoingMessage,
+                gasLimit,
+                revertOptions
+            );
+            // we call withdraw here and send a call to the strategy contract to withdraw and send assets back here
+        } else if (context.sender == strategyAddress) {
+            // this indicates that the strategy is sending assets back to the vault
+            // we then send the amount back to the owner on the EVM in USDC? (withdraw or withdrawAndCall?)
+            // withdraw(amount, address(0), context.sender); - TODO - eventually this will be the call here - watch for re-entrancy issues
+            IZRC20(_asset).approve(_GATEWAY_ADDRESS, amount);
+
+            bytes memory recipient = abi.encodePacked(strategyAddress);
+
+            RevertOptions memory revertOptions = RevertOptions(
+                0xc3e53F4d16Ae77Db1c982e75a937B9f60FE63690, // revert address
+                false, // callOnRevert
+                address(this), // abortAddress
+                bytes("revert message"),
+                uint256(30000000) // onRevertGasLimit
+            );
+
+            IGatewayZEVM(_GATEWAY_ADDRESS).withdraw(
+                recipient, // this has to be the address of the owner/user on the EVM
+                amount, // the amount that the strategy has sent back
+                address(_asset), // TODO - when I move beyond the localnet, may need to re - specify this? Maybe need origin_asset AND target_asset?
+                revertOptions // do these need to be different from the revertOptions in deposit?
+            );
+        } else {
+            // amount > 0 and sender != strategyAddress indicates that it's a deposit - is this a tight enough condition?
+            address decodedAddress;
+            if (message.length > 0) {
+                decodedAddress = abi.decode(message, (address));
+            }
+            if (zrc20 != address(_asset)) revert InvalidZRC20Address();
+            if (decodedAddress == address(0)) revert CantBeZeroAddress();
+            deposit(amount, decodedAddress);
         }
-        require(zrc20 == address(_asset), "Invalid zrc20 address");
-        require(decodedAddress != address(0), "Invalid recipient address");
-        deposit(amount, decodedAddress);
     }
 
     function onRevert(RevertContext calldata revertContext) external override {
@@ -104,7 +170,7 @@ contract UpgradeableVault is
     }
 
     function setStrategy(address _strategyAddress) external onlyOwner {
-        require(_strategyAddress != address(0), "Invalid strategy address");
+        if (_strategyAddress == address(0)) revert InvalidStrategyAddress();
         strategyAddress = _strategyAddress;
         emit StrategyUpdated(_strategyAddress);
     }
@@ -112,25 +178,19 @@ contract UpgradeableVault is
     function updateTreasuryAddress(
         address _treasuryAddress
     ) external onlyOwner {
-        require(_treasuryAddress != address(0), "Invalid treasury address");
+        if (_treasuryAddress == address(0)) revert InvalidTreasuryAddress();
         treasuryAddress = _treasuryAddress;
     }
 
     function setPerformanceFee(uint16 newFeeRate) external onlyOwner {
-        require(newFeeRate <= 2000, "Fee must be less than or equal to 20%");
+        if (newFeeRate > 2000) revert FeeExceedsLimit();
         performanceFeeRate = newFeeRate;
         emit PerformanceFeeUpdated(newFeeRate);
     }
 
     function switchStrategy(address newStrategy) external onlyOwner {
-        require(
-            newStrategy != address(0),
-            "New strategy is not a valid address"
-        );
-        require(
-            newStrategy != strategyAddress,
-            "New strategy must be different"
-        );
+        if (newStrategy == address(0)) revert InvalidStrategyAddress();
+        if (newStrategy == strategyAddress) revert InvalidStrategyAddress();
 
         address oldStrategy = strategyAddress;
         strategyAddress = newStrategy;
@@ -145,21 +205,15 @@ contract UpgradeableVault is
         uint256 vaultBalance = _asset.balanceOf(address(this));
         if (vaultBalance > 0) {
             bool success = _asset.approve(strategyAddress, vaultBalance);
-            require(success, "Approval failed");
+            if (!success) revert ApprovalFailed();
             IStrategy(strategyAddress).invest(vaultBalance);
         }
     }
 
     function emergencyWithdraw(address _token) external onlyOwner {
         uint256 balance = IERC20(_token).balanceOf(address(this));
-        require(balance > 0, "No tokens to withdraw");
+        if (balance == 0) revert NothingToWithdraw();
         SafeERC20.safeTransfer(IERC20(_token), owner(), balance);
-    }
-
-    function emergencyWithdrawETH() external onlyOwner {
-        uint256 balance = address(this).balance;
-        require(balance > 0, "No ETH to withdraw");
-        payable(owner()).transfer(balance);
     }
 
     /**
@@ -172,16 +226,10 @@ contract UpgradeableVault is
         public
         view
         virtual
-        override(ERC20Upgradeable, ERC4626Upgradeable)
+        override(ERC4626Upgradeable)
         returns (uint8)
     {
         return _decimals;
-    }
-
-    /** @dev See {IERC4626-asset}. */
-    function asset() public view virtual override returns (address) {
-        // return address of asset on target chain?
-        return address(_asset);
     }
 
     /** @dev See {IERC4626-totalAssets}. */
@@ -212,69 +260,12 @@ contract UpgradeableVault is
         return userAssets;
     }
 
-    /** @dev See {IERC4626-maxDeposit}. */
-    function maxDeposit(
-        address
-    ) public view virtual override returns (uint256) {
-        return _isVaultCollateralized() ? type(uint256).max : 0;
-    }
-
-    /** @dev See {IERC4626-maxMint}. */
-    function maxMint(address) public view virtual override returns (uint256) {
-        return type(uint256).max;
-    }
-
-    /** @dev See {IERC4626-maxWithdraw}. */
-    function maxWithdraw(
-        address user
-    ) public view virtual override returns (uint256) {
-        return _convertToAssets(balanceOf(user), Math.Rounding.Floor);
-    }
-
-    /** @dev See {IERC4626-maxRedeem}. */
-    function maxRedeem(
-        address user
-    ) public view virtual override returns (uint256) {
-        return balanceOf(user);
-    }
-
-    /** @dev See {IERC4626-previewDeposit}. */
-    function previewDeposit(
-        uint256 assets
-    ) public view virtual override returns (uint256) {
-        return _convertToShares(assets, Math.Rounding.Floor);
-    }
-
-    /** @dev See {IERC4626-previewMint}. */
-    function previewMint(
-        uint256 shares
-    ) public view virtual override returns (uint256) {
-        return _convertToAssets(shares, Math.Rounding.Ceil);
-    }
-
-    /** @dev See {IERC4626-previewWithdraw}. */
-    function previewWithdraw(
-        uint256 assets
-    ) public view virtual override returns (uint256) {
-        return _convertToShares(assets, Math.Rounding.Ceil);
-    }
-
-    /** @dev See {IERC4626-previewRedeem}. */
-    function previewRedeem(
-        uint256 shares
-    ) public view virtual override returns (uint256) {
-        return _convertToAssets(shares, Math.Rounding.Floor);
-    }
-
     /** @dev See {IERC4626-deposit}. */
     function deposit(
         uint256 assets,
         address receiver
     ) public virtual override returns (uint256) {
-        require(
-            assets <= maxDeposit(receiver),
-            "ERC4626: deposit more than max"
-        );
+        if (assets <= maxDeposit(receiver)) revert DepositExceedsLimit();
 
         uint256 shares = previewDeposit(assets);
 
@@ -295,7 +286,6 @@ contract UpgradeableVault is
 
         IZRC20(_asset).approve(_GATEWAY_ADDRESS, amount);
 
-        // address evmRecipient = 0xE6E340D132b5f46d1e472DebcD681B2aBc16e57E; // TODO change this to the MockStrategy address
         bytes memory recipient = abi.encodePacked(strategyAddress);
 
         bytes4 functionSelector = bytes4(keccak256(bytes("invest(uint256)")));
@@ -332,7 +322,7 @@ contract UpgradeableVault is
         uint256 shares,
         address receiver
     ) public virtual override returns (uint256) {
-        require(shares <= maxMint(receiver), "ERC4626: mint more than max");
+        if (shares > maxMint(receiver)) revert MintExceedsLimit();
 
         uint256 assets = previewMint(shares);
 
@@ -352,7 +342,7 @@ contract UpgradeableVault is
         address receiver,
         address user
     ) public virtual override returns (uint256) {
-        require(assets <= maxWithdraw(user), "ERC4626: withdraw more than max");
+        if (assets > maxWithdraw(user)) revert WithdrawExceedsLimit();
 
         uint256 shares = previewWithdraw(assets);
 
@@ -376,7 +366,7 @@ contract UpgradeableVault is
         address receiver,
         address user
     ) public virtual override returns (uint256) {
-        require(shares <= maxRedeem(user), "ERC4626: redeem more than max");
+        if (shares <= maxRedeem(user)) revert RedeemExceedsLimit();
 
         uint256 assets = previewRedeem(shares);
 

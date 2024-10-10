@@ -26,7 +26,7 @@ contract UpgradeableVault is
 {
     using SafeERC20 for IERC20;
 
-    IERC20 private _asset;
+    IZRC20 private _asset;
     uint8 private _decimals;
     address public strategyAddress;
     address public treasuryAddress;
@@ -58,7 +58,7 @@ contract UpgradeableVault is
     function initialize(
         string memory name_,
         string memory symbol_,
-        IERC20 asset_,
+        IZRC20 asset_,
         address strategyAddress_,
         address treasuryAddress_,
         uint16 performanceFeeRate_
@@ -94,46 +94,9 @@ contract UpgradeableVault is
         if (message.length > 0) {
             decodedAddress = abi.decode(message, (address));
         }
-        investAssets(decodedAddress, amount, zrc20);
-    }
-
-    function investAssets(
-        address user,
-        uint256 amount,
-        address zrc20
-    ) internal {
-        address gas_zrc20 = 0x2ca7d64A7EFE2D62A725E2B35Cf7230D6677FfEe; // ZRC-20 ETH.ETH
-        IZRC20(gas_zrc20).approve(_GATEWAY_ADDRESS, type(uint256).max);
-        uint256 gasLimit = 30000000; // could potentially reduce to 7000000
-
-        IZRC20(zrc20).approve(_GATEWAY_ADDRESS, amount);
-
-        // address evmRecipient = 0xE6E340D132b5f46d1e472DebcD681B2aBc16e57E; // TODO change this to the MockStrategy address
-        bytes memory recipient = abi.encodePacked(strategyAddress);
-
-        bytes4 functionSelector = bytes4(keccak256(bytes("invest(uint256)")));
-        bytes memory encodedArgs = abi.encode(amount);
-        bytes memory outgoingMessage = abi.encodePacked(
-            functionSelector,
-            encodedArgs
-        );
-
-        RevertOptions memory revertOptions = RevertOptions(
-            0xc3e53F4d16Ae77Db1c982e75a937B9f60FE63690, // revert address
-            false, // callOnRevert
-            address(this), // abortAddress
-            bytes("revert message"),
-            uint256(30000000) // onRevertGasLimit
-        );
-
-        IGatewayZEVM(_GATEWAY_ADDRESS).withdrawAndCall(
-            recipient, // this contains the recipient smart contract address
-            amount, // amount of zrc20 to withdraw
-            zrc20, // the zrc20 that is being withdrawn, also indicates which chain to target
-            outgoingMessage, // this is the function call for invest(uint256 amount) in Mock4626Strategy
-            gasLimit,
-            revertOptions
-        );
+        require(zrc20 == address(_asset), "Invalid zrc20 address");
+        require(decodedAddress != address(0), "Invalid recipient address");
+        deposit(amount, decodedAddress);
     }
 
     function onRevert(RevertContext calldata revertContext) external override {
@@ -318,17 +281,46 @@ contract UpgradeableVault is
         userPrincipal[receiver] += assets;
         totalPrincipal += assets;
 
-        _deposit(_msgSender(), receiver, assets, shares);
+        _deposit(_msgSender(), receiver, assets, shares); //TODO understand what _msgSender is going to be here?
 
-        allocateToStrategy(assets);
+        investAssets(assets);
 
         return shares;
     }
 
-    function allocateToStrategy(uint256 amount) private {
-        bool success = _asset.approve(strategyAddress, amount);
-        require(success, "Approval failed");
-        IStrategy(strategyAddress).invest(amount);
+    function investAssets(uint256 amount) internal {
+        address gas_zrc20 = 0x2ca7d64A7EFE2D62A725E2B35Cf7230D6677FfEe; // ZRC-20 ETH.ETH
+        IZRC20(gas_zrc20).approve(_GATEWAY_ADDRESS, type(uint256).max);
+        uint256 gasLimit = 30000000; // could potentially reduce to 7000000
+
+        IZRC20(_asset).approve(_GATEWAY_ADDRESS, amount);
+
+        // address evmRecipient = 0xE6E340D132b5f46d1e472DebcD681B2aBc16e57E; // TODO change this to the MockStrategy address
+        bytes memory recipient = abi.encodePacked(strategyAddress);
+
+        bytes4 functionSelector = bytes4(keccak256(bytes("invest(uint256)")));
+        bytes memory encodedArgs = abi.encode(amount);
+        bytes memory outgoingMessage = abi.encodePacked(
+            functionSelector,
+            encodedArgs
+        );
+
+        RevertOptions memory revertOptions = RevertOptions(
+            0xc3e53F4d16Ae77Db1c982e75a937B9f60FE63690, // revert address
+            false, // callOnRevert
+            address(this), // abortAddress
+            bytes("revert message"),
+            uint256(30000000) // onRevertGasLimit
+        );
+
+        IGatewayZEVM(_GATEWAY_ADDRESS).withdrawAndCall(
+            recipient, // this contains the recipient smart contract address
+            amount, // amount of zrc20 to withdraw
+            address(_asset), // the zrc20 that is being withdrawn, also indicates which chain to target
+            outgoingMessage, // this is the function call for invest(uint256 amount) in Mock4626Strategy
+            gasLimit,
+            revertOptions
+        );
     }
 
     /** @dev See {IERC4626-mint}.
@@ -369,7 +361,7 @@ contract UpgradeableVault is
         IStrategy(strategyAddress).withdraw(assets + feeWithdrawn);
         if (feeWithdrawn > 0) {
             emit PerformanceFeePaid(user, feeWithdrawn);
-            SafeERC20.safeTransfer(_asset, treasuryAddress, feeWithdrawn);
+            // SafeERC20.safeTransfer(_asset, treasuryAddress, feeWithdrawn);
         }
 
         _withdraw(_msgSender(), receiver, user, assets, shares);
@@ -394,7 +386,7 @@ contract UpgradeableVault is
 
         if (feeWithdrawn > 0) {
             emit PerformanceFeePaid(user, feeWithdrawn);
-            SafeERC20.safeTransfer(_asset, treasuryAddress, feeWithdrawn);
+            // SafeERC20.safeTransfer(_asset, treasuryAddress, feeWithdrawn);
         }
 
         _withdraw(_msgSender(), receiver, user, assets, shares);
@@ -519,7 +511,7 @@ contract UpgradeableVault is
         // Conclusion: we need to do the transfer before we mint so that any reentrancy would happen before the
         // assets are transferred and before the shares are minted, which is a valid state.
         // slither-disable-next-line reentrancy-no-eth
-        SafeERC20.safeTransferFrom(_asset, caller, address(this), assets);
+        // SafeERC20.safeTransferFrom(_asset, caller, address(this), assets);
         _mint(receiver, shares);
 
         emit Deposit(caller, receiver, assets, shares);
@@ -546,7 +538,7 @@ contract UpgradeableVault is
         // Conclusion: we need to do the transfer after the burn so that any reentrancy would happen after the
         // shares are burned and after the assets are transferred, which is a valid state.
         _burn(user, shares);
-        SafeERC20.safeTransfer(_asset, receiver, assets);
+        // SafeERC20.safeTransfer(_asset, receiver, assets);
 
         emit Withdraw(caller, receiver, user, assets, shares);
     }

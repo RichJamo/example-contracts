@@ -6,6 +6,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "./interfaces/IMoonwellVault.sol";
 import "@zetachain/protocol-contracts/contracts/evm/interfaces/IGatewayEVM.sol";
+import "hardhat/console.sol";
 
 // LOCALNET_USDC_ADDRESS = 0x0DCd1Bf9A1b36cE34237eEaFef220932846BCD82;
 // MOCK_4626_VAULT_ADDRESS - get this on deployment to localnet
@@ -58,8 +59,10 @@ contract Mock4626Strategy is Ownable {
             address(this), // receiver
             address(this) // owner
         );
+        console.log("shares: %s", shares);
         require(shares > 0, "Withdraw failed");
-
+        uint256 strategyBalance = inputToken.balanceOf(address(this));
+        console.log("strategyBalance: %s", strategyBalance);
         // send USDC back to vault on ZEVM
         bytes memory outgoingMessage = abi.encodePacked("withdraw"); // what does this message need to contain?
 
@@ -72,6 +75,8 @@ contract Mock4626Strategy is Ownable {
         );
 
         address amana_vault_address = 0x9E545E3C0baAB3E08CdfD552C960A1050f373042; // TODO get this dynamically? Or as a constant?
+        inputToken.approve(_GATEWAY_ADDRESS, _amount); // is this necessary?
+        console.log(address(inputToken));
 
         IGatewayEVM(_GATEWAY_ADDRESS).depositAndCall(
             amana_vault_address, // the amana vault contract address - make this a constant? (just an address, not bytes)

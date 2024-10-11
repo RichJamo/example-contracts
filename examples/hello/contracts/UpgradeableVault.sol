@@ -104,12 +104,16 @@ contract UpgradeableVault is
             IZRC20(gas_zrc20).approve(_GATEWAY_ADDRESS, type(uint256).max);
             uint256 gasLimit = 30000000; // could potentially reduce to 7000000
 
+            uint256 withdrawAmount;
+            if (message.length > 0) {
+                withdrawAmount = abi.decode(message, (uint256));
+            }
             bytes memory recipient = abi.encodePacked(strategyAddress);
 
             bytes4 functionSelector = bytes4(
                 keccak256(bytes("withdraw(uint256)"))
             );
-            bytes memory encodedArgs = abi.encode(amount);
+            bytes memory encodedArgs = abi.encode(withdrawAmount);
             bytes memory outgoingMessage = abi.encodePacked(
                 functionSelector,
                 encodedArgs

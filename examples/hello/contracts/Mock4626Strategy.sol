@@ -51,15 +51,16 @@ contract Mock4626Strategy is Ownable {
 
     function withdraw(
         address ownerAddress,
-        uint256 _amount
+        uint256 amount,
+        uint256 fee,
+        uint256 shares
     ) external onlyGateway {
-        uint256 shares = receiptToken.withdraw(
-            _amount,
+        receiptToken.withdraw(
+            amount + fee,
             address(this), // receiver
             address(this) // owner
         );
-        require(shares > 0, "Withdraw failed");
-        bytes memory outgoingMessage = abi.encode(ownerAddress, 1);
+        bytes memory outgoingMessage = abi.encode(ownerAddress, 1, fee, shares);
 
         RevertOptions memory revertOptions = RevertOptions(
             0xc3e53F4d16Ae77Db1c982e75a937B9f60FE63690, // revert address
@@ -70,11 +71,11 @@ contract Mock4626Strategy is Ownable {
         );
 
         address amana_vault_address = 0x9E545E3C0baAB3E08CdfD552C960A1050f373042; // TODO get this dynamically? Or as a constant?
-        inputToken.approve(_GATEWAY_ADDRESS, _amount); // is this necessary?
+        inputToken.approve(_GATEWAY_ADDRESS, amount + fee); // is this necessary?
 
         IGatewayEVM(_GATEWAY_ADDRESS).depositAndCall(
             amana_vault_address, // the amana vault contract address - make this a constant? (just an address, not bytes)
-            _amount, // the amount of USDC to send back
+            amount + fee, // the amount of USDC to send back
             address(inputToken), // ERC20 of the underlying asset token
             outgoingMessage, //the message to send
             revertOptions

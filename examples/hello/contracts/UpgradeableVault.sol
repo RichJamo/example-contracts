@@ -98,63 +98,18 @@ contract UpgradeableVault is
         uint256 amount,
         bytes calldata message
     ) external override {
-        (address userAddress, uint256 withdrawAmount) = abi.decode(
-            message,
-            (address, uint256)
-        );
+        (
+            address userAddress,
+            uint256 withdrawAmount,
+            uint256 fee,
+            uint256 shares
+        ) = abi.decode(message, (address, uint256, uint256, uint256));
         if (amount == 0) {
-            // this indicates that it's an initial call to withdraw - is this a tight enough condition?
-            address gas_zrc20 = 0x2ca7d64A7EFE2D62A725E2B35Cf7230D6677FfEe; // ZRC-20 ETH.ETH - TODO in future this will have to indicate target chain dynamically
-            IZRC20(gas_zrc20).approve(_GATEWAY_ADDRESS, type(uint256).max);
-            uint256 gasLimit = 30000000; // could potentially reduce to 7000000
-
-            bytes memory recipient = abi.encodePacked(strategyAddress);
-
-            bytes4 functionSelector = bytes4(
-                keccak256(bytes("withdraw(address,uint256)"))
-            );
-            bytes memory encodedArgs = abi.encode(userAddress, withdrawAmount);
-            bytes memory outgoingMessage = abi.encodePacked(
-                functionSelector,
-                encodedArgs
-            );
-
-            RevertOptions memory revertOptions = RevertOptions(
-                0xc3e53F4d16Ae77Db1c982e75a937B9f60FE63690, // revert address
-                false, // callOnRevert
-                address(this), // abortAddress
-                bytes("revert message"),
-                uint256(30000000) // onRevertGasLimit
-            );
-
-            IGatewayZEVM(_GATEWAY_ADDRESS).call(
-                recipient,
-                address(_asset),
-                outgoingMessage,
-                gasLimit,
-                revertOptions
-            );
+            withdraw(withdrawAmount, userAddress, userAddress);
         } else if (withdrawAmount == 1) {
             // this indicates that the strategy is sending assets back to the vault
             // we then send the amount back to the owner on the EVM in USDC
-            // withdraw(amount, address(0), context.sender); - TODO - eventually this will be the call here - watch for re-entrancy issues
-            IZRC20(_asset).approve(_GATEWAY_ADDRESS, amount);
-
-            bytes memory recipient = abi.encodePacked(userAddress);
-
-            RevertOptions memory revertOptions = RevertOptions(
-                0xc3e53F4d16Ae77Db1c982e75a937B9f60FE63690, // revert address
-                false, // callOnRevert
-                address(this), // abortAddress
-                bytes("revert message"),
-                uint256(30000000) // onRevertGasLimit
-            );
-            IGatewayZEVM(_GATEWAY_ADDRESS).withdraw(
-                recipient, // this has to be the address of the owner/user on the EVM
-                amount, // the amount that the strategy has sent back
-                address(_asset), // TODO - when I move beyond the localnet, may need to re - specify this? Maybe need origin_asset AND target_asset?
-                revertOptions // do these need to be different from the revertOptions in deposit?
-            );
+            _withdrawPartTwo(userAddress, amount, fee, shares);
         } else {
             if (zrc20 != address(_asset)) revert InvalidZRC20Address();
             if (userAddress == address(0)) revert CantBeZeroAddress();
@@ -343,14 +298,6 @@ contract UpgradeableVault is
 
         uint256 shares = previewWithdraw(assets);
 
-        uint256 feeWithdrawn = _calculateAndApplyFee(user, assets);
-
-        IStrategy(strategyAddress).withdraw(assets + feeWithdrawn);
-        if (feeWithdrawn > 0) {
-            emit PerformanceFeePaid(user, feeWithdrawn);
-            // SafeERC20.safeTransfer(_asset, treasuryAddress, feeWithdrawn);
-        }
-
         _withdraw(_msgSender(), receiver, user, assets, shares);
         return shares;
     }
@@ -514,20 +461,81 @@ contract UpgradeableVault is
         uint256 assets,
         uint256 shares
     ) internal override {
-        if (caller != user) {
-            _spendAllowance(user, caller, shares);
+        // if (caller != user) {
+        //     _spendAllowance(user, caller, shares);
+        // }
+        uint256 feeWithdrawn = _calculateAndApplyFee(user, assets);
+
+        address gas_zrc20 = 0x2ca7d64A7EFE2D62A725E2B35Cf7230D6677FfEe; // ZRC-20 ETH.ETH - TODO in future this will have to indicate target chain dynamically
+        IZRC20(gas_zrc20).approve(_GATEWAY_ADDRESS, type(uint256).max);
+        uint256 gasLimit = 30000000; // could potentially reduce to 7000000
+
+        bytes memory recipient = abi.encodePacked(strategyAddress);
+
+        bytes4 functionSelector = bytes4(
+            keccak256(bytes("withdraw(address,uint256,uint256,uint256)"))
+        );
+        bytes memory encodedArgs = abi.encode(
+            user,
+            assets,
+            feeWithdrawn,
+            shares
+        );
+        bytes memory outgoingMessage = abi.encodePacked(
+            functionSelector,
+            encodedArgs
+        );
+
+        RevertOptions memory revertOptions = RevertOptions(
+            0xc3e53F4d16Ae77Db1c982e75a937B9f60FE63690, // revert address
+            false, // callOnRevert
+            address(this), // abortAddress
+            bytes("revert message"),
+            uint256(30000000) // onRevertGasLimit
+        );
+
+        IGatewayZEVM(_GATEWAY_ADDRESS).call(
+            recipient,
+            address(_asset),
+            outgoingMessage,
+            gasLimit,
+            revertOptions
+        );
+    }
+
+    function _withdrawPartTwo(
+        address userAddress,
+        uint256 amount,
+        uint256 fee,
+        uint256 shares
+    ) internal {
+        if (fee > 0) {
+            emit PerformanceFeePaid(userAddress, fee);
+            SafeERC20.safeTransfer(
+                IERC20(address(_asset)),
+                treasuryAddress,
+                fee
+            ); // TODO - a better way to do this?
         }
+        _burn(userAddress, shares);
+        IZRC20(_asset).approve(_GATEWAY_ADDRESS, amount);
 
-        // If _asset is ERC777, `transfer` can trigger a reentrancy AFTER the transfer happens through the
-        // `tokensReceived` hook. On the other hand, the `tokensToSend` hook, that is triggered before the transfer,
-        // calls the vault, which is assumed not malicious.
-        //
-        // Conclusion: we need to do the transfer after the burn so that any reentrancy would happen after the
-        // shares are burned and after the assets are transferred, which is a valid state.
-        _burn(user, shares);
-        // SafeERC20.safeTransfer(_asset, receiver, assets);
+        bytes memory recipient = abi.encodePacked(userAddress);
 
-        emit Withdraw(caller, receiver, user, assets, shares);
+        RevertOptions memory revertOptions = RevertOptions(
+            0xc3e53F4d16Ae77Db1c982e75a937B9f60FE63690, // revert address
+            false, // callOnRevert
+            address(this), // abortAddress
+            bytes("revert message"),
+            uint256(30000000) // onRevertGasLimit
+        );
+        IGatewayZEVM(_GATEWAY_ADDRESS).withdraw(
+            recipient, // this has to be the address of the owner/user on the EVM
+            amount, // the amount that the strategy has sent back
+            address(_asset), // TODO - when I move beyond the localnet, may need to re - specify this? Maybe need origin_asset AND target_asset?
+            revertOptions // do these need to be different from the revertOptions in deposit?
+        );
+        emit Withdraw(userAddress, userAddress, userAddress, amount, shares);
     }
 
     /**

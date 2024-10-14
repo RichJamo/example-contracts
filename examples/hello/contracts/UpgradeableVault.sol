@@ -98,22 +98,22 @@ contract UpgradeableVault is
         uint256 amount,
         bytes calldata message
     ) external override {
+        (address userAddress, uint256 withdrawAmount) = abi.decode(
+            message,
+            (address, uint256)
+        );
         if (amount == 0) {
             // this indicates that it's an initial call to withdraw - is this a tight enough condition?
             address gas_zrc20 = 0x2ca7d64A7EFE2D62A725E2B35Cf7230D6677FfEe; // ZRC-20 ETH.ETH - TODO in future this will have to indicate target chain dynamically
             IZRC20(gas_zrc20).approve(_GATEWAY_ADDRESS, type(uint256).max);
             uint256 gasLimit = 30000000; // could potentially reduce to 7000000
 
-            uint256 withdrawAmount;
-            if (message.length > 0) {
-                withdrawAmount = abi.decode(message, (uint256));
-            }
             bytes memory recipient = abi.encodePacked(strategyAddress);
 
             bytes4 functionSelector = bytes4(
-                keccak256(bytes("withdraw(uint256)"))
+                keccak256(bytes("withdraw(address,uint256)"))
             );
-            bytes memory encodedArgs = abi.encode(withdrawAmount);
+            bytes memory encodedArgs = abi.encode(userAddress, withdrawAmount);
             bytes memory outgoingMessage = abi.encodePacked(
                 functionSelector,
                 encodedArgs
@@ -134,42 +134,31 @@ contract UpgradeableVault is
                 gasLimit,
                 revertOptions
             );
-            // we call withdraw here and send a call to the strategy contract to withdraw and send assets back here
+        } else if (withdrawAmount == 1) {
+            // this indicates that the strategy is sending assets back to the vault
+            // we then send the amount back to the owner on the EVM in USDC
+            // withdraw(amount, address(0), context.sender); - TODO - eventually this will be the call here - watch for re-entrancy issues
+            IZRC20(_asset).approve(_GATEWAY_ADDRESS, amount);
+
+            bytes memory recipient = abi.encodePacked(userAddress);
+
+            RevertOptions memory revertOptions = RevertOptions(
+                0xc3e53F4d16Ae77Db1c982e75a937B9f60FE63690, // revert address
+                false, // callOnRevert
+                address(this), // abortAddress
+                bytes("revert message"),
+                uint256(30000000) // onRevertGasLimit
+            );
+            IGatewayZEVM(_GATEWAY_ADDRESS).withdraw(
+                recipient, // this has to be the address of the owner/user on the EVM
+                amount, // the amount that the strategy has sent back
+                address(_asset), // TODO - when I move beyond the localnet, may need to re - specify this? Maybe need origin_asset AND target_asset?
+                revertOptions // do these need to be different from the revertOptions in deposit?
+            );
         } else {
-            address decodedAddress;
-            if (message.length > 0) {
-                decodedAddress = abi.decode(message, (address));
-            }
-            if (decodedAddress == strategyAddress) {
-                // this indicates that the strategy is sending assets back to the vault
-                // we then send the amount back to the owner on the EVM in USDC? (withdraw or withdrawAndCall?)
-                // withdraw(amount, address(0), context.sender); - TODO - eventually this will be the call here - watch for re-entrancy issues
-                IZRC20(_asset).approve(_GATEWAY_ADDRESS, amount);
-
-                bytes memory recipient = abi.encodePacked(strategyAddress);
-
-                RevertOptions memory revertOptions = RevertOptions(
-                    0xc3e53F4d16Ae77Db1c982e75a937B9f60FE63690, // revert address
-                    false, // callOnRevert
-                    address(this), // abortAddress
-                    bytes("revert message"),
-                    uint256(30000000) // onRevertGasLimit
-                );
-                console.log("Calling withdraw on gateway");
-                IGatewayZEVM(_GATEWAY_ADDRESS).withdraw(
-                    recipient, // this has to be the address of the owner/user on the EVM
-                    amount, // the amount that the strategy has sent back
-                    address(_asset), // TODO - when I move beyond the localnet, may need to re - specify this? Maybe need origin_asset AND target_asset?
-                    revertOptions // do these need to be different from the revertOptions in deposit?
-                );
-            } else {
-                console.log("Executing Deposit");
-
-                // amount > 0 and sender != strategyAddress indicates that it's a deposit - is this a tight enough condition?
-                if (zrc20 != address(_asset)) revert InvalidZRC20Address();
-                if (decodedAddress == address(0)) revert CantBeZeroAddress();
-                deposit(amount, decodedAddress);
-            }
+            if (zrc20 != address(_asset)) revert InvalidZRC20Address();
+            if (userAddress == address(0)) revert CantBeZeroAddress();
+            deposit(amount, userAddress);
         }
     }
 

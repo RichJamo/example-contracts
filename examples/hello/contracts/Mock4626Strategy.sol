@@ -6,14 +6,13 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "./interfaces/IMoonwellVault.sol";
 import "@zetachain/protocol-contracts/contracts/evm/interfaces/IGatewayEVM.sol";
-import "hardhat/console.sol";
 
 // LOCALNET_USDC_ADDRESS = 0x0DCd1Bf9A1b36cE34237eEaFef220932846BCD82;
 // MOCK_4626_VAULT_ADDRESS - get this on deployment to localnet
 
 contract Mock4626Strategy is Ownable {
     string public name;
-    // address public immutable amanaVault;
+    // address public immutable amanaVault; - have removed this but perhaps need to put it back in for checking purposes?
     IERC20 public immutable inputToken;
     IMoonwellVault public immutable receiptToken;
     address constant _GATEWAY_ADDRESS =
@@ -21,14 +20,11 @@ contract Mock4626Strategy is Ownable {
 
     constructor(
         string memory _name,
-        // address _amanaVault,
         address _inputTokenAddress,
         address _receiptTokenAddress
     ) Ownable(msg.sender) {
-        // require(_amanaVault != address(0), "Invalid amanaVault address");
         name = _name;
-        // amanaVault = _amanaVault;
-        inputToken = IERC20(_inputTokenAddress); // could get this from amanaVault
+        inputToken = IERC20(_inputTokenAddress);
         receiptToken = IMoonwellVault(_receiptTokenAddress);
     }
 
@@ -53,18 +49,17 @@ contract Mock4626Strategy is Ownable {
         require(shares > 0, "Deposit failed");
     }
 
-    function withdraw(uint256 _amount) external onlyGateway {
+    function withdraw(
+        address ownerAddress,
+        uint256 _amount
+    ) external onlyGateway {
         uint256 shares = receiptToken.withdraw(
             _amount,
             address(this), // receiver
             address(this) // owner
         );
-        console.log("shares: %s", shares);
         require(shares > 0, "Withdraw failed");
-        uint256 strategyBalance = inputToken.balanceOf(address(this));
-        console.log("strategyBalance: %s", strategyBalance);
-        // send USDC back to vault on ZEVM
-        bytes memory outgoingMessage = abi.encode(address(this)); // what does this message need to contain?
+        bytes memory outgoingMessage = abi.encode(ownerAddress, 1);
 
         RevertOptions memory revertOptions = RevertOptions(
             0xc3e53F4d16Ae77Db1c982e75a937B9f60FE63690, // revert address
@@ -76,7 +71,6 @@ contract Mock4626Strategy is Ownable {
 
         address amana_vault_address = 0x9E545E3C0baAB3E08CdfD552C960A1050f373042; // TODO get this dynamically? Or as a constant?
         inputToken.approve(_GATEWAY_ADDRESS, _amount); // is this necessary?
-        console.log(address(inputToken));
 
         IGatewayEVM(_GATEWAY_ADDRESS).depositAndCall(
             amana_vault_address, // the amana vault contract address - make this a constant? (just an address, not bytes)

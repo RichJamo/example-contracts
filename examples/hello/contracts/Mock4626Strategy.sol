@@ -64,7 +64,7 @@ contract Mock4626Strategy is Ownable {
         uint256 strategyBalance = inputToken.balanceOf(address(this));
         console.log("strategyBalance: %s", strategyBalance);
         // send USDC back to vault on ZEVM
-        bytes memory outgoingMessage = abi.encodePacked("withdraw"); // what does this message need to contain?
+        bytes memory outgoingMessage = abi.encode(address(this)); // what does this message need to contain?
 
         RevertOptions memory revertOptions = RevertOptions(
             0xc3e53F4d16Ae77Db1c982e75a937B9f60FE63690, // revert address
